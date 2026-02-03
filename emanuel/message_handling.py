@@ -12,6 +12,7 @@ from discord.ext import commands
 import fastmcp
 from fastmcp.client.logging import LogMessage
 import base64
+from rich import print as rprint
 
 
 logger = setup_logger(__name__)
@@ -54,7 +55,7 @@ def role_dice(sides: int) -> int:
     return randint(1, sides)
 
 
-async def join_voice_channel(shared: DiscordShared) -> None:
+async def join_voice_channel(shared: DiscordShared) -> str:
     
     async with shared.lock:
         bot = shared.discord_bot
@@ -79,13 +80,64 @@ async def join_voice_channel(shared: DiscordShared) -> None:
         # Bot ist noch nirgends verbunden
         await voice_channel.connect()
 
-async def leave_voice_channel(shared: DiscordShared) -> None:
+    return f"✅ Erfolgreich **{voice_channel.name}** beigetreten."
+
+async def leave_voice_channel(shared: DiscordShared) -> str:
 
     async with shared.lock:
         bot = shared.discord_bot
 
     if bot.voice_clients:
         await bot.voice_clients[0].disconnect()
+
+    return "✅ Erfolgreich Voice-Channel verlassen."
+
+
+async def once_done(sink: discord.sinks.WaveSink, channel: discord.TextChannel, *args):  # Our voice client already passes these in.
+    rprint("Finished recording.")
+    recorded_users = [  # A list of recorded users
+        f"<@{user_id}>"
+        for user_id, audio in sink.audio_data.items()
+    ]
+    await sink.vc.disconnect()  # Disconnect from the voice channel.
+    files = [discord.File(audio.file, f"{user_id}.{sink.encoding}") for user_id, audio in sink.audio_data.items()]  # List down the files.
+    await channel.send(f"finished recording audio for: {', '.join(recorded_users)}.", files=files)  # Send a message with the accumulated files.
+
+
+connections = {}  # A cache for the voice clients.
+
+async def record_voice_channel(shared: DiscordShared) -> str:
+
+    async with shared.lock:
+        message = shared.discord_message
+    
+    if not message.guild.voice_client:
+        return "Need to be in a voice channel to start recording!"
+        
+    vc = message.guild.voice_client
+
+
+    connections.update({message.guild.id: vc})  # Updating the cache with the guild and channel.
+
+    vc.start_recording(
+        discord.sinks.WaveSink(),  # The sink type to use.
+        once_done,  # What to do once done.
+        message.channel  # The channel to disconnect from.
+    )
+    return "Started recording!"
+
+async def stop_recording_voice_channel(shared: DiscordShared) -> str:
+
+    async with shared.lock:
+        message = shared.discord_message
+    
+    if not message.guild.voice_client:
+        return "Need to be in a voice channel to stop recording!"
+        
+    vc = message.guild.voice_client
+
+    vc.stop_recording()
+    return "Stopped recording!"
 
 
 ### NODES
@@ -226,7 +278,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     build_chat = BuildChatNode()
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
-    add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
+    add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel, record_voice_channel])
     add_mcp = AddMCPToolsNode(mcp_client)
     get_new_tool_calls = ExtractNewToolCallsNode()
     get_next_tool_call_result = GetNextToolCallResultNode()
