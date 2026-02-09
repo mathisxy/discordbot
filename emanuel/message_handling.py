@@ -1,12 +1,11 @@
-from llmir import AIMessageToolResponse
 from edgygraph import Graph, START, END, Node
 from voice_handling import handle_voice
 from logger import setup_logger
 from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode
-from edgynodes.discord import StartTypingNode, StopTypingNode, TemporaryMessageController
+from edgynodes.discord import StartTypingNode, StopTypingNode
 from edgynodes.discord_llm import BuildChatNode, RespondNode
+from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
 import edgynodes as e 
-from random import randint
 import os
 import discord
 from discord.ext import commands
@@ -23,12 +22,11 @@ logger = setup_logger(__name__)
 
 ### STATES
 
-class MyState(e.discordmessage.State, e.discord_discordmessage.State, e.discord_llm.State, e.discord.State, e.llm.State):
+class MyState(e.discordmessage.State, e.discord_discordmessage.State, e.discord_llm.State, e.discord.State, e.llm.State, e.discordtmp.State):
     pass
 
-class MyShared(e.discordmessage.Shared, e.discord_discordmessage.Shared, e.discord_llm.Shared, e.discord.Shared, e.llm.Shared):
-
-    discord_temporary_message_controller: TemporaryMessageController
+class MyShared(e.discordmessage.Shared, e.discord_discordmessage.Shared, e.discord_llm.Shared, e.discord.Shared, e.llm.Shared, e.discordtmp.Shared):
+    pass
 
 ### EDGES
 
@@ -38,19 +36,6 @@ def should_react(shared: e.discord_discordmessage.Shared) -> bool:
         or isinstance(shared.discordmessage.message.channel, discord.DMChannel)    # Or when in DM
     )
 
-
-### NODES
-
-class ClearTmpDiscordMessagesNode(Node[MyState, MyShared]):
-
-    async def run(self, state: MyState, shared: MyShared) -> None:
-
-        async with shared.lock:
-
-            keys = list(shared.discord_temporary_message_controller.messages.keys())
-
-            for key in keys:
-                await shared.discord_temporary_message_controller.delete(key)
 
 
 ### TOOLS
@@ -67,24 +52,20 @@ async def join_voice_channel(shared: e.discord_discordmessage.Shared) -> str:
     
     voice_channel = message.author.voice.channel
 
-    # Bot ist bereits irgendwo verbunden
-    if bot.voice_clients:
-        vc = bot.voice_clients[0]
-
-        # Schon im richtigen Channel
-        if vc.channel != voice_channel:
-            
-            # Sonst rüberziehen
-            await vc.move_to(voice_channel)
-
-    else:
-        # Bot ist noch nirgends verbunden
-        await voice_channel.connect()
 
     asyncio.create_task(handle_voice(voice_channel, message.channel, bot=bot))
 
-
     return f"✅ Erfolgreich **{voice_channel.name}** beigetreten."
+
+### NODES
+
+class DebugNode(Node[MyState, MyShared]):
+
+    async def run(self, state: MyState, shared: MyShared) -> None:
+        rprint("DEBUG NODE")
+        rprint(state)
+        rprint(shared)
+        rprint("DEBUG NODE END")
 
 
 ### GRAPH HANDLING
@@ -108,9 +89,12 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     azure = LLMAzureNode(model="", api_key=os.getenv("AZURE_API_KEY", ""), base_url=os.getenv("AZURE_BASE_URL", ""), enable_streaming=True)
     ollama = LLMOllamaNode(model="ministral-3:14b", enable_streaming=True)
 
+    debug_node = DebugNode()
+
 
     state = MyState(
         discordmessage=e.discordmessage.StateAttribute(),
+        discordtmp=e.discordtmp.StateAttribute(),
         discord=e.discord.StateAttribute(),
         llm=e.llm.StateAttribute(),
     )
@@ -118,12 +102,14 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
         discordmessage=e.discordmessage.SharedAttribute(
             message=message
         ),
+        discordtmp=e.discordtmp.SharedAttribute(
+            controller=temporary_message_controller
+        ),
         discord=e.discord.SharedAttribute(
             text_channel=message.channel,
             bot=bot,
         ),
         llm=e.llm.SharedAttribute(),
-        discord_temporary_message_controller=TemporaryMessageController(message.channel)
     )
 
     llm_node = mistral
@@ -134,14 +120,14 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
     add_mcp = AddMCPToolsNode(mcp_client)
     get_new_tool_calls = ExtractNewToolCallsNode()
-    get_next_tool_call_result = GetNextToolCallResultNode()
-    clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
-    integrate_tool_call_results = IntegrateToolResultsNode()
-    integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
     respond = RespondNode()
     respond_tool_results = RespondNode()
     save_messages = SaveNewMessagesNode()
     save_messages_for_new_turn = SaveNewMessagesNode()
+    get_next_tool_call_result = GetNextToolCallResultNode()
+    clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
+    integrate_tool_call_results = IntegrateToolResultsNode()
+    integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
 
     # GRAPH
 
@@ -173,7 +159,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             ),
             (
                 respond,
-                get_new_tool_calls
+                get_new_tool_calls,
             ),
             (
                 get_new_tool_calls,
@@ -197,12 +183,12 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             ),
             (
                 integrate_tool_call_results,
-                respond_tool_results,
-            ),
+                lambda st, sh: stop_typing if not st.llm.new_messages else respond_tool_results
+            ), 
             (
                 respond_tool_results,
-                lambda st, sh: stop_typing if not [m for m in st.llm.new_messages if isinstance(m, AIMessageToolResponse)] else save_messages_for_new_turn
-            ), 
+                save_messages_for_new_turn,
+            ),
             (
                 save_messages_for_new_turn,
                 llm_node

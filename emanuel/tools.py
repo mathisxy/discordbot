@@ -1,8 +1,6 @@
-import discord
 from random import randint
-import asyncio
 
-import edgynodes as e
+import edgynodes as e # type: ignore
 
 def role_dice(sides: int) -> int:
     """
@@ -28,6 +26,7 @@ async def leave_voice_channel(shared: e.discord.Shared) -> str:
         bot = shared.discord.bot
 
     if bot.voice_clients:
-        await bot.voice_clients[0].disconnect()
+        await bot.voice_clients[0].disconnect(force=True)
+        return "✅ Erfolgreich Voice-Channel verlassen."
 
-    return "✅ Erfolgreich Voice-Channel verlassen."
+    return "❌ Der Bot ist in keinem Voice-Channel."

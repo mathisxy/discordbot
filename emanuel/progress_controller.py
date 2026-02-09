@@ -1,4 +1,4 @@
-from edgynodes.discord import TemporaryMessageController # type: ignore
+from edgynodes.discordtmp import TemporaryMessageController # type: ignore
 import discord
 
 class ProgressController:
@@ -57,6 +57,8 @@ class ProgressController:
 
     @classmethod
     async def update_preview(cls, tmp_controller: TemporaryMessageController, image: discord.File, key: str = "progress") -> None:
+
+        print("UPDATE PREVIEW -------------------------------------------------------------------------------------------------")
 
         embed = discord.Embed(
             title="Progress",
