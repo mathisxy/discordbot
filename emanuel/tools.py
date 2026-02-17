@@ -1,6 +1,9 @@
 from random import randint
+from typing import Protocol
+from edgygraph import StateProtocol
 
 import edgynodes as e # type: ignore
+
 
 def role_dice(sides: int) -> int:
     """
@@ -20,10 +23,17 @@ def role_dice(sides: int) -> int:
     return randint(1, sides)
 
 
-async def leave_voice_channel(shared: e.discord.Shared) -> str:
+class DiscordLLMSharedProtocol(e.llm.SharedProtocol, e.discord.SharedProtocol, Protocol):
+    pass
 
-    async with shared.lock:
-        bot = shared.discord.bot
+
+async def leave_voice_channel(ctx: e.llm.ToolContext[StateProtocol, DiscordLLMSharedProtocol]) -> str:
+    """
+    Leave the voice channel.
+    """
+
+    async with ctx.shared.lock:
+        bot = ctx.shared.discord.bot
 
     if bot.voice_clients:
         await bot.voice_clients[0].disconnect(force=True)

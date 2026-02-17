@@ -1,15 +1,16 @@
-from edgygraph import Graph, START, Node
+from edgygraph import Graph, START, Node, State, Shared
 import discord
 from discord.ext import commands
 import os
 from rich import print as rprint
 import fastmcp
-from typing import cast
+from typing import Protocol
+from llmir import AIMessage, AIRoles, AIChunkText
 
 from edgynodes.discordvoice import JoinVoiceChannelNode, StartRecordVoiceNode, AwaitVoiceStopVADNode, AwaitVoiceStartVADNode, StopRecordVoiceNode, STTMistralNode
-from edgynodes.discordvoice_llm import TranscriptionsToAINode
+from edgynodes.discordvoice_llm import TranscriptionsToAINode, PiperTTSNode
 from edgynodes.discord_llm import BuildChatNode, RespondNode
-from edgynodes.llm import LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode
+from edgynodes.llm import LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, AddMessageNode
 from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
 from edgynodes.discord import StartTypingNode, StopTypingNode
 import edgynodes as e
@@ -19,19 +20,31 @@ from mcp_client import get_log_handler, get_progress_handler
 
 ### STATES
 
-class DiscordTextVoiceLLMState(e.discordvoice.State, e.discord.State, e.llm.State, e.discord_llm.State, e.discordvoice_llm.State, e.discordtmp.State):
+class MyStateProtocol(e.discordvoice.StateProtocol, e.discord.StateProtocol, e.llm.StateProtocol, e.discordtmp.StateProtocol, Protocol):
     pass
 
-class DiscordTextVoiceLLMShared(e.discordvoice.Shared, e.discord.Shared, e.llm.Shared, e.discord_llm.Shared, e.discordvoice_llm.Shared, e.discordtmp.Shared):
+class MySharedProtocol(e.discordvoice.SharedProtocol, e.discord.SharedProtocol, e.llm.SharedProtocol, e.discordtmp.SharedProtocol, Protocol):
     pass
+
+class MyState(State):
+    discord: e.discord.StateAttribute
+    discordvoice: e.discordvoice.StateAttribute
+    llm: e.llm.StateAttribute
+    discordtmp: e.discordtmp.StateAttribute
+
+class MyShared(Shared):
+    discord: e.discord.SharedAttribute
+    discordvoice: e.discordvoice.SharedAttribute
+    llm: e.llm.SharedAttribute
+    discordtmp: e.discordtmp.SharedAttribute
 
 
 ### NODES
 
 
-class SendSinkedVoiceNode(Node[e.discordvoice.State, e.discordvoice.Shared]):
+class SendSinkedVoiceNode(Node[e.discordvoice.StateProtocol, e.discordvoice.SharedProtocol]):
 
-    async def run(self, state: e.discordvoice.State, shared: e.discordvoice.Shared) -> None:
+    async def run(self, state: e.discordvoice.StateProtocol, shared: e.discordvoice.SharedProtocol) -> None:
         
         async with shared.lock:
             if not shared.discordvoice.sink:
@@ -59,18 +72,18 @@ class SendSinkedVoiceNode(Node[e.discordvoice.State, e.discordvoice.Shared]):
 
 async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.Messageable, bot: commands.Bot) -> None:
 
-    if bot.voice_clients:
-        voice_client = bot.voice_clients[0]
+    # if bot.voice_clients:
+    #     voice_client = bot.voice_clients[0]
 
-        # Schon im richtigen Channel
-        if voice_client.channel != channel:
+    #     # Schon im richtigen Channel
+    #     if voice_client.channel != channel:
             
-            # Sonst rüberziehen
-            await voice_client.move_to(channel) # type: ignore
+    #         # Sonst rüberziehen
+    #         await voice_client.move_to(channel) # type: ignore
 
-    else:
-        # Bot ist noch nirgends verbunden
-        voice_client = await channel.connect()
+    # else:
+    #     # Bot ist noch nirgends verbunden
+    #     voice_client = await channel.connect()
 
 
     temporary_message_controller = TemporaryMessageController(text_channel)
@@ -82,16 +95,16 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
 
     mcp_client = fastmcp.Client("http://localhost:8001/mcp", log_handler=log_handler, progress_handler=progress_handler)
 
-    state = DiscordTextVoiceLLMState(
+    state = MyState(
         discordvoice=e.discordvoice.StateAttribute(),
         discord=e.discord.StateAttribute(),
         llm=e.llm.StateAttribute(),
         discordtmp=e.discordtmp.StateAttribute()
     )
-    shared = DiscordTextVoiceLLMShared(
+    shared = MyShared(
         discordvoice=e.discordvoice.SharedAttribute(
             channel=channel,
-            client=cast(discord.VoiceClient, voice_client),
+            client=None,
             text_channel=text_channel
         ),
         discord=e.discord.SharedAttribute(
@@ -107,11 +120,20 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     join = JoinVoiceChannelNode()
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
+    add_message = AddMessageNode(AIMessage(
+        role=AIRoles.SYSTEM,
+        chunks=[
+            AIChunkText(
+                text="Du bist Emanuel. Deine Nachrichten werden in Sprache ausgegeben im Discord Gruppen Voice Channel. " \
+                "Nutze deshalb NIEMALS Emojis oder Smileys und halte dich kurz. Überprüfe deine Antworten und entferne immer alle Emojies!"
+            )
+        ]
+    ))
     start_record = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
     stop_record = StopRecordVoiceNode()
     wait_voice = AwaitVoiceStartVADNode()
     wait_silence = AwaitVoiceStopVADNode(silence_timeout=1.5)
-    stt = STTMistralNode(api_key=os.getenv("MISTRAL_API_KEY", ""), minimal_audio_bytes=96000) # 0.5s
+    stt = STTMistralNode(api_key=os.getenv("MISTRAL_API_KEY", "")) # 0.5s
     transcription_to_ai = TranscriptionsToAINode()
     build_chat = BuildChatNode()
     llm = LLMMistralNode(api_key=os.getenv("MISTRAL_API_KEY", ""), model="mistral-medium-latest", stream=True)
@@ -129,8 +151,10 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
     clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
 
+    piper = PiperTTSNode() # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
 
-    await Graph[DiscordTextVoiceLLMState, DiscordTextVoiceLLMShared](
+
+    await Graph[MyStateProtocol, MySharedProtocol](
         edges=[
             (
                 START,
@@ -142,6 +166,10 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 tools,
+                add_message
+            ),
+            (
+                add_message,
                 build_chat
             ),
             (
@@ -178,14 +206,22 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 save_transcription,
+                start_typing
+            ),
+            (
+                start_typing,
                 llm
             ),
             (
                 llm,
-                respond
+            #     respond
+            # ),
+            # (
+            #     respond,
+                piper
             ),
             (
-                respond,
+                piper,
                 get_new_tool_calls,
             ),
             (
@@ -222,6 +258,10 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 save_for_reset,
+                stop_typing
+            ),
+            (
+                stop_typing,
                 start_record
             )
         ]

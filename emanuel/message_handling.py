@@ -1,7 +1,7 @@
-from edgygraph import Graph, START, END, Node
+from edgygraph import Graph, START, END, Node, State, Shared
 from voice_handling import handle_voice
 from logger import setup_logger
-from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode
+from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode, ToolContext
 from edgynodes.discord import StartTypingNode, StopTypingNode
 from edgynodes.discord_llm import BuildChatNode, RespondNode
 from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
@@ -12,6 +12,7 @@ from discord.ext import commands
 import fastmcp
 from rich import print as rprint
 import asyncio
+from typing import Protocol
 
 from mcp_client import get_log_handler, get_progress_handler
 from tools import role_dice, leave_voice_channel
@@ -22,15 +23,30 @@ logger = setup_logger(__name__)
 
 ### STATES
 
-class MyState(e.discordmessage.State, e.discord_discordmessage.State, e.discord_llm.State, e.discord.State, e.llm.State, e.discordtmp.State):
+class MyStateProtocol(e.llm.StateProtocol, e.discord.StateProtocol, e.discordtmp.StateProtocol, e.discordmessage.StateProtocol, Protocol):
     pass
 
-class MyShared(e.discordmessage.Shared, e.discord_discordmessage.Shared, e.discord_llm.Shared, e.discord.Shared, e.llm.Shared, e.discordtmp.Shared):
+class MySharedProtocol(e.llm.SharedProtocol, e.discord.SharedProtocol, e.discordtmp.SharedProtocol, e.discordmessage.SharedProtocol, Protocol):
     pass
+
+
+class MyState(State):
+    llm: e.llm.StateAttribute
+    discord: e.discord.StateAttribute
+    discordtmp: e.discordtmp.StateAttribute
+    discordmessage: e.discordmessage.StateAttribute
+
+
+class MyShared(Shared):
+    llm: e.llm.SharedAttribute
+    discord: e.discord.SharedAttribute
+    discordtmp: e.discordtmp.SharedAttribute
+    discordmessage: e.discordmessage.SharedAttribute
+
 
 ### EDGES
 
-def should_react(shared: e.discord_discordmessage.Shared) -> bool:
+def should_react(shared: MySharedProtocol) -> bool:
     return shared.discordmessage.message.author != shared.discord.bot.user and (   # Prevent reaction on self
         shared.discord.bot.user in shared.discordmessage.message.mentions          # Only when mentioned
         or isinstance(shared.discordmessage.message.channel, discord.DMChannel)    # Or when in DM
@@ -41,11 +57,11 @@ def should_react(shared: e.discord_discordmessage.Shared) -> bool:
 ### TOOLS
 
 
-async def join_voice_channel(shared: e.discord_discordmessage.Shared) -> str:
+async def join_voice_channel(ctx: ToolContext[MyStateProtocol, MySharedProtocol]) -> str:
 
-    async with shared.lock:
-        bot = shared.discord.bot
-        message = shared.discordmessage.message
+    async with ctx.shared.lock:
+        bot = ctx.shared.discord.bot
+        message = ctx.shared.discordmessage.message
 
     if not hasattr(message.author, "voice") or not isinstance(message.author.voice.channel, discord.VoiceChannel):
         raise Exception("❌ Du bist in keinem Voice-Channel.")
@@ -59,9 +75,9 @@ async def join_voice_channel(shared: e.discord_discordmessage.Shared) -> str:
 
 ### NODES
 
-class DebugNode(Node[MyState, MyShared]):
+class DebugNode(Node[MyStateProtocol, MySharedProtocol]):
 
-    async def run(self, state: MyState, shared: MyShared) -> None:
+    async def __call__(self, state: MyStateProtocol, shared: MySharedProtocol) -> None:
         rprint("DEBUG NODE")
         rprint(state)
         rprint(shared)
@@ -114,7 +130,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
     llm_node = mistral
 
-    build_chat = BuildChatNode()
+    build_chat = BuildChatNode(limit=15)
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
@@ -131,7 +147,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
     # GRAPH
 
-    graph = Graph[MyState, MyShared](
+    graph = Graph[MyStateProtocol, MySharedProtocol](
         edges=[
             (
                 START,
