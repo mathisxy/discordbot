@@ -1,16 +1,17 @@
-from edgygraph import Graph, START, Node, State, Shared
+from edgygraph import Graph, START, Node, State, Shared, InteractiveDebugHook, Properties as Props
 import discord
 from discord.ext import commands
 import os
 from rich import print as rprint
 import fastmcp
-from typing import Protocol
+from typing import Protocol, Literal
 from llmir import AIMessage, AIRoles, AIChunkText
+from piper import SynthesisConfig
 
 from edgynodes.discordvoice import JoinVoiceChannelNode, StartRecordVoiceNode, AwaitVoiceStopVADNode, AwaitVoiceStartVADNode, StopRecordVoiceNode, STTMistralNode
 from edgynodes.discordvoice_llm import TranscriptionsToAINode, PiperTTSNode
 from edgynodes.discord_llm import BuildChatNode, RespondNode
-from edgynodes.llm import LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, AddMessageNode
+from edgynodes.llm import LLMOllamaNode, LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, AddMessageNode, StripFormattingsNode
 from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
 from edgynodes.discord import StartTypingNode, StopTypingNode
 import edgynodes as e
@@ -37,6 +38,27 @@ class MyShared(Shared):
     discordvoice: e.discordvoice.SharedAttribute
     llm: e.llm.SharedAttribute
     discordtmp: e.discordtmp.SharedAttribute
+
+
+### TOOLS
+
+syn_config = SynthesisConfig()
+
+def set_voice(speaker: Literal["amused", "angry", "disgusted", "drunk", "neutral", "sleepy", "surprised", "whisper"]) -> str:
+    ids = {
+        "amused": 0,
+        "angry": 1,
+        "disgusted": 2,
+        "drunk": 3,
+        "neutral": 4,
+        "sleepy": 5,
+        "surprised": 6,
+        "whisper": 7,
+    }
+    syn_config.speaker_id = ids[speaker]
+
+    return "Voice set to " + speaker 
+
 
 
 ### NODES
@@ -117,44 +139,57 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
         )
     )
 
+    mistral = LLMMistralNode(api_key=os.getenv("MISTRAL_API_KEY", ""), model="mistral-medium-latest", stream=True)
+    ollama = LLMOllamaNode(model="ministral-3:14b", enable_streaming=True)
+
     join = JoinVoiceChannelNode()
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
+    stop_typing_after_error = StopTypingNode()
     add_message = AddMessageNode(AIMessage(
         role=AIRoles.SYSTEM,
         chunks=[
             AIChunkText(
-                text="Du bist Emanuel. Deine Nachrichten werden in Sprache ausgegeben im Discord Gruppen Voice Channel. " \
-                "Nutze deshalb NIEMALS Emojis oder Smileys und halte dich kurz. Überprüfe deine Antworten und entferne immer alle Emojies!"
+                text="Du bist Emanuel. Deine Nachrichten werden in Sprache ausgegeben im Discord Gruppen Voice Channel.\n" \
+                "Nutze deshalb NIEMALS Emojis oder Smileys und halte dich kurz.\n" \
+                "Nutze für verschiedene Emotionen das Tool 'set_voice' um die Stimme zu ändern. Nutze dieses tool regelmäßig um dich auszudrücken und die Leute zu überraschen.\n" \
+                "Denk daran das Tool zu callen und niemals einfach set voice zu schreiben.\n"
+
+                #"Wichtig: Antworte immer nur wenn du auch direkt angesprochen wirst mit 'Emanuel'. Wenn du nicht direkt angesprochen wirst, dann schreibe ' ', also ein Leerzeichen."
             )
         ]
     ))
     start_record = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
     stop_record = StopRecordVoiceNode()
     wait_voice = AwaitVoiceStartVADNode()
+    start_record_for_interrupt = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
+    wait_voice_for_interrupt = AwaitVoiceStartVADNode()
     wait_silence = AwaitVoiceStopVADNode(silence_timeout=1.5)
     stt = STTMistralNode(api_key=os.getenv("MISTRAL_API_KEY", "")) # 0.5s
     transcription_to_ai = TranscriptionsToAINode()
-    build_chat = BuildChatNode()
-    llm = LLMMistralNode(api_key=os.getenv("MISTRAL_API_KEY", ""), model="mistral-medium-latest", stream=True)
-    respond = RespondNode()
+    build_chat = BuildChatNode(limit=1)
+    llm = mistral
+    respond = RespondNode(filter=lambda m, c: not isinstance(c, AIChunkText))
     respond_tool_call_results = RespondNode()
     save_messages = SaveNewMessagesNode()
     save_for_new_turn = SaveNewMessagesNode()
     save_for_reset = SaveNewMessagesNode()
     save_transcription = SaveNewMessagesNode()
     mcp_tools = AddMCPToolsNode(mcp_client)
-    tools = AddToolsNode([leave_voice_channel])
+    tools = AddToolsNode([leave_voice_channel, set_voice])
     get_new_tool_calls = ExtractNewToolCallsNode()
     get_next_tool_call_result = GetNextToolCallResultNode()
     integrate_tool_call_results = IntegrateToolResultsNode()
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
     clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
 
-    piper = PiperTTSNode() # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
+    piper = PiperTTSNode(syn_config=syn_config) # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
+
+    strip_formattings = StripFormattingsNode()
 
 
     await Graph[MyStateProtocol, MySharedProtocol](
+        # hooks=[InteractiveDebugHook()],
         edges=[
             (
                 START,
@@ -210,18 +245,26 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 start_typing,
-                llm
+                start_record_for_interrupt,
+            ),
+            (
+                start_record_for_interrupt,
+                [wait_voice_for_interrupt, llm]
             ),
             (
                 llm,
-            #     respond
-            # ),
-            # (
-            #     respond,
+                strip_formattings
+            ),
+            (
+                strip_formattings,
                 piper
             ),
             (
                 piper,
+                respond
+            ),
+            (
+                respond,
                 get_new_tool_calls,
             ),
             (
@@ -263,6 +306,11 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             (
                 stop_typing,
                 start_record
+            ),
+
+            (
+                Exception,
+                stop_typing_after_error
             )
         ]
     )(state, shared)

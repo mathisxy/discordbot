@@ -1,4 +1,4 @@
-from edgygraph import Graph, START, END, Node, State, Shared
+from edgygraph import Graph, START, END, Node, State, Shared, InteractiveDebugHook, Properties
 from voice_handling import handle_voice
 from logger import setup_logger
 from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode, ToolContext
@@ -130,7 +130,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
     llm_node = mistral
 
-    build_chat = BuildChatNode(limit=15)
+    build_chat = BuildChatNode(limit=10)
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
@@ -148,6 +148,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     # GRAPH
 
     graph = Graph[MyStateProtocol, MySharedProtocol](
+        # hooks=[InteractiveDebugHook()],
         edges=[
             (
                 START,
@@ -155,7 +156,8 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             ),
             (
                 start_typing,
-                build_chat
+                build_chat,
+                Properties(instant=True)
             ),
             (
                 build_chat,
@@ -163,7 +165,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             ),
             (
                 add_tools,
-                add_mcp
+                add_mcp,
             ),
             (
                 add_mcp,
@@ -171,7 +173,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             ),
             (
                 llm_node,
-                respond
+                respond,
             ),
             (
                 respond,
@@ -209,6 +211,11 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
                 save_messages_for_new_turn,
                 llm_node
             ),
+
+            (
+                Exception,
+                respond
+            )
         ]
     )
 
