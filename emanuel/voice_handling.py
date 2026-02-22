@@ -1,8 +1,9 @@
-from edgygraph import Graph, START, Node, State, Shared, InteractiveDebugHook, Properties as Props
+from edgygraph import Graph, START, Node, State, Shared, ErrorConfig, Config
+from edgygraph.graph_hooks import InteractiveDebugHook
 import discord
 from discord.ext import commands
 import os
-from rich import print as rprint
+from rich import print
 import fastmcp
 from typing import Protocol, Literal
 from llmir import AIMessage, AIRoles, AIChunkText
@@ -163,7 +164,8 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     stop_record = StopRecordVoiceNode()
     wait_voice = AwaitVoiceStartVADNode()
     start_record_for_interrupt = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
-    wait_voice_for_interrupt = AwaitVoiceStartVADNode()
+    wait_voice_for_interrupt = AwaitVoiceStartVADNode(on_finished=lambda st, sh: sh.discordvoice.interrupt.set())
+    stop_record_for_interrupt = StopRecordVoiceNode()
     wait_silence = AwaitVoiceStopVADNode(silence_timeout=1.5)
     stt = STTMistralNode(api_key=os.getenv("MISTRAL_API_KEY", "")) # 0.5s
     transcription_to_ai = TranscriptionsToAINode()
@@ -189,49 +191,19 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
 
 
     await Graph[MyStateProtocol, MySharedProtocol](
-        # hooks=[InteractiveDebugHook()],
+        #hooks=[InteractiveDebugHook()],
         edges=[
             (
                 START,
                 mcp_tools,
-            ),
-            (
-                mcp_tools,
                 tools,
-            ),
-            (
-                tools,
-                add_message
-            ),
-            (
                 add_message,
-                build_chat
-            ),
-            (
                 build_chat,
-                join
-            ),
-            (
                 join,
-                start_record
-            ),
-            (
                 start_record,
                 wait_voice,
-            ),
-            (
-                wait_voice,
                 wait_silence,
-            ),
-            (
-                wait_silence,
-                stop_record
-            ),
-            (
                 stop_record,
-                stt
-            ),
-            (
                 stt,
                 transcription_to_ai
             ),
@@ -241,7 +213,8 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 save_transcription,
-                start_typing
+                start_typing,
+                Config(instant=True)
             ),
             (
                 start_typing,
@@ -249,7 +222,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 start_record_for_interrupt,
-                [wait_voice_for_interrupt, llm]
+                llm
             ),
             (
                 llm,
@@ -257,7 +230,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             ),
             (
                 strip_formattings,
-                piper
+                [piper, wait_voice_for_interrupt]
             ),
             (
                 piper,
@@ -310,7 +283,8 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
 
             (
                 Exception,
-                stop_typing_after_error
+                stop_typing_after_error,
+                ErrorConfig(propagate=True)
             )
         ]
     )(state, shared)

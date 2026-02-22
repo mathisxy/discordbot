@@ -1,4 +1,4 @@
-from edgygraph import Graph, START, END, Node, State, Shared, InteractiveDebugHook, Properties
+from edgygraph import Graph, START, END, Node, State, Shared, Config, ErrorConfig
 from voice_handling import handle_voice
 from logger import setup_logger
 from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode, ToolContext
@@ -157,31 +157,17 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             (
                 start_typing,
                 build_chat,
-                Properties(instant=True)
+                Config(instant=True)
             ),
             (
                 build_chat,
-                add_tools
-            ),
-            (
                 add_tools,
                 add_mcp,
-            ),
-            (
-                add_mcp,
-                llm_node
-            ),
-            (
                 llm_node,
                 respond,
-            ),
-            (
-                respond,
                 get_new_tool_calls,
-            ),
-            (
-                get_new_tool_calls,
-                save_messages
+                save_messages,
+                END,
             ),
             (
                 save_messages,
@@ -206,15 +192,12 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             (
                 respond_tool_results,
                 save_messages_for_new_turn,
-            ),
-            (
-                save_messages_for_new_turn,
                 llm_node
             ),
 
             (
                 Exception,
-                respond
+                respond,
             )
         ]
     )
