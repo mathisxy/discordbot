@@ -1,5 +1,5 @@
-from edgygraph import Graph, START, Node, State, Shared, ErrorConfig, Config
-from edgygraph.graph_hooks import InteractiveDebugHook
+from edgygraph import Graph, START, Node, StateProtocol, SharedProtocol, ErrorConfig, Config, END, State, Shared
+from edgygraph.graph_hooks import InteractiveDebugHook, NodePrintHook
 import discord
 from discord.ext import commands
 import os
@@ -8,11 +8,12 @@ import fastmcp
 from typing import Protocol, Literal
 from llmir import AIMessage, AIRoles, AIChunkText
 from piper import SynthesisConfig
+import asyncio
 
-from edgynodes.discordvoice import JoinVoiceChannelNode, StartRecordVoiceNode, AwaitVoiceStopVADNode, AwaitVoiceStartVADNode, StopRecordVoiceNode, STTMistralNode
-from edgynodes.discordvoice_llm import TranscriptionsToAINode, PiperTTSNode
+from edgynodes.discordvoice import JoinVoiceChannelNode, StartRecordVoiceNode, AwaitVoiceStopVADNode, AwaitVoiceStartVADNode, StopRecordVoiceNode, STTMistralNode, SetInterruptNode, ClearInterruptNode
+from edgynodes.discordvoice_llm import TranscriptionsToAINode, PiperTTSNode, Qwen3TTSNode
 from edgynodes.discord_llm import BuildChatNode, RespondNode
-from edgynodes.llm import LLMOllamaNode, LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, AddMessageNode, StripFormattingsNode
+from edgynodes.llm import LLMOllamaNode, LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, AddMessageNode, StripFormattingsNode, ToolContext
 from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
 from edgynodes.discord import StartTypingNode, StopTypingNode
 import edgynodes as e
@@ -64,33 +65,13 @@ def set_voice(speaker: Literal["amused", "angry", "disgusted", "drunk", "neutral
 
 ### NODES
 
+class DebugNode(Node[StateProtocol, SharedProtocol]):
 
-class SendSinkedVoiceNode(Node[e.discordvoice.StateProtocol, e.discordvoice.SharedProtocol]):
+    def __init__(self, name: str = "DebugNode") -> None:
+        self.name = name
 
-    async def run(self, state: e.discordvoice.StateProtocol, shared: e.discordvoice.SharedProtocol) -> None:
-        
-        async with shared.lock:
-            if not shared.discordvoice.sink:
-                raise RuntimeError("No voice sink available to send recordings.")
-
-            text_channel = shared.discordvoice.text_channel
-            if not text_channel:
-                raise RuntimeError("No text channel available to send recordings.")
-
-            sink = shared.discordvoice.sink
-
-        recorded_users = [  # A list of recorded users
-            f"<@{user_id}>"
-            for user_id, audio in sink.audio_data.items()
-        ]
-
-        for user_id, audio in sink.audio_data.items():
-            file = discord.File(audio.file, f"recording-{user_id}.{sink.encoding}")
-
-            await text_channel.send(
-                content=f"Recording of <@{user_id}>",
-                file=file
-            )
+    async def __call__(self, state: StateProtocol, shared: SharedProtocol) -> None:
+        print(f"DEBUG NODE: {self.name}")
 
 
 async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.Messageable, bot: commands.Bot) -> None:
@@ -107,6 +88,8 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     # else:
     #     # Bot ist noch nirgends verbunden
     #     voice_client = await channel.connect()
+
+    # return
 
 
     temporary_message_controller = TemporaryMessageController(text_channel)
@@ -140,6 +123,9 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
         )
     )
 
+    async def on_end(state: MyStateProtocol, shared: MySharedProtocol) -> None:
+        await leave_voice_channel(ToolContext[MyStateProtocol, MySharedProtocol](state=state, shared=shared))
+
     mistral = LLMMistralNode(api_key=os.getenv("MISTRAL_API_KEY", ""), model="mistral-medium-latest", stream=True)
     ollama = LLMOllamaNode(model="ministral-3:14b", enable_streaming=True)
 
@@ -153,19 +139,20 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             AIChunkText(
                 text="Du bist Emanuel. Deine Nachrichten werden in Sprache ausgegeben im Discord Gruppen Voice Channel.\n" \
                 "Nutze deshalb NIEMALS Emojis oder Smileys und halte dich kurz.\n" \
-                "Nutze für verschiedene Emotionen das Tool 'set_voice' um die Stimme zu ändern. Nutze dieses tool regelmäßig um dich auszudrücken und die Leute zu überraschen.\n" \
-                "Denk daran das Tool zu callen und niemals einfach set voice zu schreiben.\n"
-
-                #"Wichtig: Antworte immer nur wenn du auch direkt angesprochen wirst mit 'Emanuel'. Wenn du nicht direkt angesprochen wirst, dann schreibe ' ', also ein Leerzeichen."
+                # "Wichtig: Antworte nur wenn du direkt angesprochen wurdest, z.B. mit 'Emanuel'. Wenn du nicht direkt angesprochen wurdest, dann schreibe ' ' und stoppe die Antwort.\n" \
+                # "Nutze für verschiedene Emotionen das Tool 'set_voice' um die Stimme zu ändern. Nutze dieses tool regelmäßig um dich auszudrücken und die Leute zu überraschen.\n" \
+                # "Denk daran das Tool zu callen und niemals einfach set voice zu schreiben.\n"
             )
         ]
     ))
     start_record = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
     stop_record = StopRecordVoiceNode()
     wait_voice = AwaitVoiceStartVADNode()
-    start_record_for_interrupt = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
-    wait_voice_for_interrupt = AwaitVoiceStartVADNode(on_finished=lambda st, sh: sh.discordvoice.interrupt.set())
-    stop_record_for_interrupt = StopRecordVoiceNode()
+    start_record_for_interrupt = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(3), delay=0.5)
+    wait_voice_for_interrupt = AwaitVoiceStartVADNode()
+    interrupt = SetInterruptNode()
+    clear_interrupt = ClearInterruptNode()
+
     wait_silence = AwaitVoiceStopVADNode(silence_timeout=1.5)
     stt = STTMistralNode(api_key=os.getenv("MISTRAL_API_KEY", "")) # 0.5s
     transcription_to_ai = TranscriptionsToAINode()
@@ -178,113 +165,89 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     save_for_reset = SaveNewMessagesNode()
     save_transcription = SaveNewMessagesNode()
     mcp_tools = AddMCPToolsNode(mcp_client)
-    tools = AddToolsNode([leave_voice_channel, set_voice])
+    tools = AddToolsNode([leave_voice_channel])
     get_new_tool_calls = ExtractNewToolCallsNode()
     get_next_tool_call_result = GetNextToolCallResultNode()
     integrate_tool_call_results = IntegrateToolResultsNode()
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
     clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
+    debug1 = DebugNode("_________----------------------------------------_____________---__-__-___---__-____-__-----_-___---_")
+    debug2 = DebugNode("2")
 
-    piper = PiperTTSNode(syn_config=syn_config) # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
+    initial = (mcp_tools, tools, add_message, build_chat, join)
+
+    tts = Qwen3TTSNode()# PiperTTSNode(syn_config=syn_config) # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
 
     strip_formattings = StripFormattingsNode()
 
 
     await Graph[MyStateProtocol, MySharedProtocol](
-        #hooks=[InteractiveDebugHook()],
+        hooks=[
+            #InteractiveDebugHook(),
+            NodePrintHook()
+        ],
         edges=[
             (
                 START,
-                mcp_tools,
-                tools,
-                add_message,
-                build_chat,
-                join,
+                *initial,
                 start_record,
                 wait_voice,
                 wait_silence,
                 stop_record,
+                clear_interrupt,
                 stt,
-                transcription_to_ai
-            ),
-            (
                 transcription_to_ai,
-                lambda st, sh: save_transcription if st.llm.new_messages else start_record
-            ),
-            (
-                save_transcription,
+                lambda st, sh: [save_transcription, start_typing] if st.llm.new_messages else start_record,
+
                 start_typing,
-                Config(instant=True)
-            ),
-            (
-                start_typing,
-                start_record_for_interrupt,
-            ),
-            (
-                start_record_for_interrupt,
-                llm
-            ),
-            (
                 llm,
-                strip_formattings
-            ),
-            (
                 strip_formattings,
-                [piper, wait_voice_for_interrupt]
-            ),
-            (
-                piper,
-                respond
-            ),
-            (
+                tts,
                 respond,
                 get_new_tool_calls,
-            ),
-            (
-                get_new_tool_calls,
-                save_messages
-            ),
-            (
                 save_messages,
-                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results
-            ),
-            (
+                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results,
+
                 get_next_tool_call_result,
-                clear_tmp_discord_messages
-            ),
-            (
                 clear_tmp_discord_messages,
-                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results
-            ),
-            (
+                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results,
+
                 integrate_mcp_tool_call_results,
-                integrate_tool_call_results
-            ),
-            (
                 integrate_tool_call_results,
-                respond_tool_call_results
-            ),
-            (
                 respond_tool_call_results,
-                lambda st, sh: save_for_new_turn if st.llm.new_messages else save_for_reset
-            ),
-            (
+                lambda st, sh: save_for_new_turn if st.llm.new_messages else save_for_reset,
+
                 save_for_new_turn,
-                llm
-            ),
-            (
+                llm,
+                None,
+
                 save_for_reset,
-                stop_typing
-            ),
-            (
                 stop_typing,
-                start_record
+                wait_voice,
+
+            (
+                (tts, Exception),
+                wait_silence,
             ),
 
             (
                 Exception,
                 stop_typing_after_error,
-                ErrorConfig(propagate=True)
-            )
-        ]
+                ErrorConfig(propagate=False)
+            ),
+            (
+                stop_typing_after_error,
+                lambda st, sh: on_end(st, sh)
+            ), 
+            END
+        ),
+        (
+            start_typing,
+            debug1,
+            start_record_for_interrupt,
+            wait_voice_for_interrupt,
+            interrupt,
+            
+            clear_interrupt
+        )]
     )(state, shared)

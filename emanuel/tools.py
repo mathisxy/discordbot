@@ -27,7 +27,7 @@ class DiscordLLMSharedProtocol(e.llm.SharedProtocol, e.discord.SharedProtocol, P
     pass
 
 
-async def leave_voice_channel(ctx: e.llm.ToolContext[StateProtocol, DiscordLLMSharedProtocol]) -> str:
+async def leave_voice_channel[T: StateProtocol, S: DiscordLLMSharedProtocol](ctx: e.llm.ToolContext[T, S]) -> str:
     """
     Leave the voice channel.
     """

@@ -12,8 +12,6 @@ def get_log_handler(temporary_message_controller: TemporaryMessageController):
 
     # Log Handler for custom MCP Server
     async def log_handler(log_message: LogMessage):
-
-        print("PREVIEW -------------------------------------------------------------------------------------------------")
         
         if log_message.data.get("msg") == "preview_image":
             image_base64: str = log_message.data.get("extra").get("base64")

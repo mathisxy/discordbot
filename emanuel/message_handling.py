@@ -1,7 +1,10 @@
-from edgygraph import Graph, START, END, Node, State, Shared, Config, ErrorConfig
+from edgygraph import Graph, START, END, Node, State, Shared
+from edgygraph.graph_hooks import NodePrintHook
+from edgynodes.llm.nodes.core.messages import AddMessageNode
+from llmir import AIChunkText, AIMessage, AIRoles
 from voice_handling import handle_voice
 from logger import setup_logger
-from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode, ToolContext
+from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode, ToolContext, TurnCounterNode
 from edgynodes.discord import StartTypingNode, StopTypingNode
 from edgynodes.discord_llm import BuildChatNode, RespondNode
 from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
@@ -129,6 +132,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     )
 
     llm_node = mistral
+    llm_node_after_max_turns = mistral.copy()
 
     build_chat = BuildChatNode(limit=10)
     start_typing = StartTypingNode()
@@ -138,68 +142,59 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     get_new_tool_calls = ExtractNewToolCallsNode()
     respond = RespondNode()
     respond_tool_results = RespondNode()
+    respond_after_error = RespondNode()
+    notify_max_turns = AddMessageNode(AIMessage(role=AIRoles.USER, chunks=[AIChunkText(text="You have reached the maximum number of turns for this conversation, you cannot call any more tools.")]))
     save_messages = SaveNewMessagesNode()
     save_messages_for_new_turn = SaveNewMessagesNode()
     get_next_tool_call_result = GetNextToolCallResultNode()
     clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
     integrate_tool_call_results = IntegrateToolResultsNode()
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
+    turn_counter = TurnCounterNode()
+
+    MAX_TURNS = 4
 
     # GRAPH
 
     graph = Graph[MyStateProtocol, MySharedProtocol](
-        # hooks=[InteractiveDebugHook()],
+        hooks=[NodePrintHook()],
         edges=[
             (
                 START,
-                lambda st, sh: start_typing if should_react(sh) else END
-            ),
-            (
-                start_typing,
-                build_chat,
-                Config(instant=True)
-            ),
-            (
+                lambda st, sh: [start_typing, build_chat] if should_react(sh) else None,
+
                 build_chat,
                 add_tools,
                 add_mcp,
                 llm_node,
+                turn_counter,
                 respond,
                 get_new_tool_calls,
                 save_messages,
-                END,
-            ),
-            (
-                save_messages,
-                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results
-            ),
-            (
+                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results,
+
                 get_next_tool_call_result,
-                clear_tmp_discord_messages
-            ),
-            (
                 clear_tmp_discord_messages,
-                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results
-            ),
-            (
+                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results,
+
                 integrate_mcp_tool_call_results,
-                integrate_tool_call_results
-            ),
-            (
                 integrate_tool_call_results,
-                lambda st, sh: stop_typing if not st.llm.new_messages else respond_tool_results
-            ), 
-            (
+                lambda st, sh: stop_typing if not st.llm.new_messages else respond_tool_results,
+
                 respond_tool_results,
                 save_messages_for_new_turn,
-                llm_node
-            ),
+                lambda st, sh: llm_node if st.llm.turn_count <= MAX_TURNS else notify_max_turns,
 
-            (
+                notify_max_turns,
+                llm_node_after_max_turns,
+                respond_after_error,
+
                 Exception,
-                respond,
-            )
-        ]
+                respond_after_error,
+                stop_typing,
+
+                END
+        )]
     )
 
     state, shared = await graph(state, shared)
