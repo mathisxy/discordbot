@@ -19,6 +19,7 @@ from typing import Protocol
 
 from mcp_client import get_log_handler, get_progress_handler
 from tools import role_dice, leave_voice_channel
+from get_llm_node import get_llm_node
 
 
 logger = setup_logger(__name__)
@@ -99,16 +100,9 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     log_handler = get_log_handler(temporary_message_controller)
     progress_handler = get_progress_handler(temporary_message_controller)
 
-    mcp_client = fastmcp.Client("http://localhost:8001/mcp", log_handler=log_handler, progress_handler=progress_handler)
-
-    openai = LLMOpenAINode(model="gpt-5.1", api_key=os.getenv("OPENAI_API_KEY", ""), enable_streaming=True)
-    claude = LLMClaudeNode(model="claude-haiku-4-5-20251001", api_key=os.getenv("CLAUDE_API_KEY", ""), enable_streaming=True)
-    gemini = LLMGeminiNode(model="gemini-3-flash-preview", api_key=os.getenv("GEMINI_API_KEY", ""),enable_streaming=True)
-    mistral = LLMMistralNode(model="mistral-medium-latest", api_key=os.getenv("MISTRAL_API_KEY", ""), stream=True)
-    azure = LLMAzureNode(model="", api_key=os.getenv("AZURE_API_KEY", ""), base_url=os.getenv("AZURE_BASE_URL", ""), enable_streaming=True)
-    ollama = LLMOllamaNode(model="ministral-3:14b", enable_streaming=True)
-
-    debug_node = DebugNode()
+    add_mcp_tools = [
+        AddMCPToolsNode(fastmcp.Client(url, log_handler=log_handler, progress_handler=progress_handler)) for url in os.getenv("MCP_SERVER_URLS", "").split(",") if url.strip() != ""
+    ]
 
 
     state = MyState(
@@ -131,14 +125,13 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
         llm=e.llm.SharedAttribute(),
     )
 
-    llm_node = mistral
-    llm_node_after_max_turns = mistral.copy()
+    llm_node = get_llm_node()
+    llm_node_after_max_turns = llm_node.copy()
 
     build_chat = BuildChatNode(limit=10)
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
-    add_mcp = AddMCPToolsNode(mcp_client)
     get_new_tool_calls = ExtractNewToolCallsNode()
     respond = RespondNode()
     respond_tool_results = RespondNode()
@@ -161,13 +154,11 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
         edges=[
             (
                 START,
-                lambda st, sh: [start_typing, build_chat] if should_react(sh) else None,
+                lambda st, sh: [start_typing, build_chat, add_tools] if should_react(sh) else None,
 
-                build_chat,
                 add_tools,
-                add_mcp,
-                llm_node,
-                turn_counter,
+                *add_mcp_tools,
+                [llm_node, -turn_counter],
                 respond,
                 get_new_tool_calls,
                 save_messages,
@@ -191,6 +182,9 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
                 Exception,
                 respond_after_error,
+                stop_typing,
+
+                Exception,
                 stop_typing,
 
                 END

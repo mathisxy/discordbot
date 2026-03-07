@@ -1,4 +1,4 @@
-from edgygraph import Graph, START, Node, StateProtocol, SharedProtocol, ErrorConfig, Config, END, State, Shared
+from edgygraph import Graph, START, Node, StateProtocol, SharedProtocol, END, State, Shared
 from edgygraph.graph_hooks import InteractiveDebugHook, NodePrintHook
 import discord
 from discord.ext import commands
@@ -225,29 +225,24 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
                 stop_typing,
                 wait_voice,
 
-            (
                 (tts, Exception),
                 wait_silence,
-            ),
 
-            (
                 Exception,
                 stop_typing_after_error,
-                ErrorConfig(propagate=False)
+
+                stop_typing_after_error,
+                lambda st, sh: on_end(st, sh),
+
+                END
             ),
             (
-                stop_typing_after_error,
-                lambda st, sh: on_end(st, sh)
-            ), 
-            END
-        ),
-        (
-            start_typing,
-            debug1,
-            start_record_for_interrupt,
-            wait_voice_for_interrupt,
-            interrupt,
-            
-            clear_interrupt
-        )]
+                start_typing,
+                debug1,
+                start_record_for_interrupt,
+                wait_voice_for_interrupt,
+                interrupt,
+                
+                clear_interrupt
+            )]
     )(state, shared)
