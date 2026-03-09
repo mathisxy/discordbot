@@ -1,25 +1,33 @@
 from edgygraph import Graph, START, Node, StateProtocol, SharedProtocol, END, State, Shared
-from edgygraph.graph_hooks import InteractiveDebugHook, NodePrintHook
+from edgygraph.graph_hooks import NodePrintHook
 import discord
 from discord.ext import commands
 import os
 from rich import print
-import fastmcp
 from typing import Protocol, Literal
 from llmir import AIMessage, AIRoles, AIChunkText
 from piper import SynthesisConfig
-import asyncio
 
-from edgynodes.discordvoice import JoinVoiceChannelNode, StartRecordVoiceNode, AwaitVoiceStopVADNode, AwaitVoiceStartVADNode, StopRecordVoiceNode, STTMistralNode, SetInterruptNode, ClearInterruptNode
-from edgynodes.discordvoice_llm import TranscriptionsToAINode, PiperTTSNode, Qwen3TTSNode
-from edgynodes.discord_llm import BuildChatNode, RespondNode
-from edgynodes.llm import LLMOllamaNode, LLMMistralNode, SaveNewMessagesNode, AddMCPToolsNode, AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, AddMessageNode, StripFormattingsNode, ToolContext
-from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
-from edgynodes.discord import StartTypingNode, StopTypingNode
+from edgynodes.discordvoice.nodes.channel import JoinVoiceChannelNode
+from edgynodes.discordvoice.nodes.recording import StartRecordVoiceNode, StopRecordVoiceNode
+from edgynodes.discordvoice.nodes.vad import VADWaveSink, AwaitVoiceStartVADNode, AwaitVoiceStopVADNode
+from edgynodes.discordvoice.nodes.stt import STTMistralNode
+from edgynodes.discordvoice.nodes.interrupt import SetInterruptNode, ClearInterruptNode
+from edgynodes.discordvoice_llm.nodes.transcriptions_to_ai import TranscriptionsToAINode
+from edgynodes.discordvoice_llm.nodes.tts.qwen import Qwen3TTSNode
+from edgynodes.discord_llm.nodes.build_chat import BuildChatNode
+from edgynodes.discord_llm.nodes.respond import RespondNode
+from edgynodes.llm.nodes.messages import SaveNewMessagesNode, AddMessageNode
+from edgynodes.llm.nodes.tools import AddToolsNode, GetNextToolCallResultNode, ExtractNewToolCallsNode, IntegrateMCPToolResultsNode, IntegrateToolResultsNode, ToolContext
+from edgynodes.llm.nodes.formatting import StripFormattingsNode
+from edgynodes.discordtmp.nodes.clear import ClearTmpDiscordMessagesNode
+from edgynodes.discordtmp import TemporaryMessageController
+from edgynodes.discord.nodes.typing import StartTypingNode, StopTypingNode
+
 import edgynodes as e
 
 from tools import leave_voice_channel
-from mcp_client import get_log_handler, get_progress_handler
+from get_nodes import get_llm_node, get_mcp_nodes
 
 ### STATES
 
@@ -95,12 +103,6 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     temporary_message_controller = TemporaryMessageController(text_channel)
 
 
-    log_handler = get_log_handler(temporary_message_controller)
-    progress_handler = get_progress_handler(temporary_message_controller)
-
-
-    mcp_client = fastmcp.Client("http://localhost:8001/mcp", log_handler=log_handler, progress_handler=progress_handler)
-
     state = MyState(
         discordvoice=e.discordvoice.StateAttribute(),
         discord=e.discord.StateAttribute(),
@@ -126,9 +128,6 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     async def on_end(state: MyStateProtocol, shared: MySharedProtocol) -> None:
         await leave_voice_channel(ToolContext[MyStateProtocol, MySharedProtocol](state=state, shared=shared))
 
-    mistral = LLMMistralNode(api_key=os.getenv("MISTRAL_API_KEY", ""), model="mistral-medium-latest", stream=True)
-    ollama = LLMOllamaNode(model="ministral-3:14b", enable_streaming=True)
-
     join = JoinVoiceChannelNode()
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
@@ -145,10 +144,10 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
             )
         ]
     ))
-    start_record = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(), delay=0.5)
+    start_record = StartRecordVoiceNode(sink_factory=lambda: VADWaveSink(), delay=0.5)
     stop_record = StopRecordVoiceNode()
     wait_voice = AwaitVoiceStartVADNode()
-    start_record_for_interrupt = StartRecordVoiceNode(sink_factory=lambda: e.discordvoice.VADWaveSink(3), delay=0.5)
+    start_record_for_interrupt = StartRecordVoiceNode(sink_factory=lambda: VADWaveSink(3), delay=0.5)
     wait_voice_for_interrupt = AwaitVoiceStartVADNode()
     interrupt = SetInterruptNode()
     clear_interrupt = ClearInterruptNode()
@@ -157,14 +156,14 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     stt = STTMistralNode(api_key=os.getenv("MISTRAL_API_KEY", "")) # 0.5s
     transcription_to_ai = TranscriptionsToAINode()
     build_chat = BuildChatNode(limit=1)
-    llm = mistral
+    llm = get_llm_node()
     respond = RespondNode(filter=lambda m, c: not isinstance(c, AIChunkText))
     respond_tool_call_results = RespondNode()
     save_messages = SaveNewMessagesNode()
     save_for_new_turn = SaveNewMessagesNode()
     save_for_reset = SaveNewMessagesNode()
     save_transcription = SaveNewMessagesNode()
-    mcp_tools = AddMCPToolsNode(mcp_client)
+    add_mcp_tools = get_mcp_nodes(temporary_message_controller)
     tools = AddToolsNode([leave_voice_channel])
     get_new_tool_calls = ExtractNewToolCallsNode()
     get_next_tool_call_result = GetNextToolCallResultNode()
@@ -174,7 +173,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     debug1 = DebugNode("_________----------------------------------------_____________---__-__-___---__-____-__-----_-___---_")
     debug2 = DebugNode("2")
 
-    initial = (mcp_tools, tools, add_message, build_chat, join)
+    initial = (*add_mcp_tools, tools, add_message, build_chat, join)
 
     tts = Qwen3TTSNode()# PiperTTSNode(syn_config=syn_config) # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
 
@@ -218,8 +217,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
                 lambda st, sh: save_for_new_turn if st.llm.new_messages else save_for_reset,
 
                 save_for_new_turn,
-                llm,
-                None,
+                -llm,
 
                 save_for_reset,
                 stop_typing,

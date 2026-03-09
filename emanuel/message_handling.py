@@ -1,25 +1,27 @@
-from edgygraph import Graph, START, END, Node, State, Shared
-from edgygraph.graph_hooks import NodePrintHook
-from edgynodes.llm.nodes.core.messages import AddMessageNode
-from llmir import AIChunkText, AIMessage, AIRoles
-from voice_handling import handle_voice
-from logger import setup_logger
-from edgynodes.llm import LLMAzureNode, LLMOllamaNode, LLMClaudeNode, ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode, SaveNewMessagesNode, LLMGeminiNode, LLMMistralNode, AddMCPToolsNode, LLMOpenAINode, ToolContext, TurnCounterNode
-from edgynodes.discord import StartTypingNode, StopTypingNode
-from edgynodes.discord_llm import BuildChatNode, RespondNode
-from edgynodes.discordtmp import ClearTmpDiscordMessagesNode, TemporaryMessageController
-import edgynodes as e 
-import os
 import discord
 from discord.ext import commands
-import fastmcp
 from rich import print as rprint
 import asyncio
 from typing import Protocol
 
-from mcp_client import get_log_handler, get_progress_handler
+from edgygraph import Graph, START, END, Node, State, Shared
+from edgygraph.graph_hooks import NodePrintHook
+from llmir import AIChunkText, AIMessage, AIRoles
+from edgynodes.llm.nodes.tools import ToolContext
+from edgynodes.llm.nodes.tools import ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode
+from edgynodes.llm.nodes.messages import AddMessageNode, SaveNewMessagesNode
+from edgynodes.llm.nodes.turn_counter import IncrementTurnCounterNode
+from edgynodes.discord.nodes.typing import StartTypingNode, StopTypingNode
+from edgynodes.discord_llm.nodes.build_chat import BuildChatNode
+from edgynodes.discord_llm.nodes.respond import RespondNode
+from edgynodes.discordtmp import TemporaryMessageController
+from edgynodes.discordtmp.nodes.clear import ClearTmpDiscordMessagesNode
+import edgynodes as e 
+
+from logger import setup_logger
 from tools import role_dice, leave_voice_channel
-from get_llm_node import get_llm_node
+from voice_handling import handle_voice
+from get_nodes import get_llm_node, get_mcp_nodes
 
 
 logger = setup_logger(__name__)
@@ -97,13 +99,6 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
     temporary_message_controller = TemporaryMessageController(message.channel)
 
-    log_handler = get_log_handler(temporary_message_controller)
-    progress_handler = get_progress_handler(temporary_message_controller)
-
-    add_mcp_tools = [
-        AddMCPToolsNode(fastmcp.Client(url, log_handler=log_handler, progress_handler=progress_handler)) for url in os.getenv("MCP_SERVER_URLS", "").split(",") if url.strip() != ""
-    ]
-
 
     state = MyState(
         discordmessage=e.discordmessage.StateAttribute(),
@@ -132,6 +127,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
+    add_mcp_tools = get_mcp_nodes(temporary_message_controller)
     get_new_tool_calls = ExtractNewToolCallsNode()
     respond = RespondNode()
     respond_tool_results = RespondNode()
@@ -143,7 +139,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     clear_tmp_discord_messages = ClearTmpDiscordMessagesNode()
     integrate_tool_call_results = IntegrateToolResultsNode()
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
-    turn_counter = TurnCounterNode()
+    turn_counter = IncrementTurnCounterNode()
 
     MAX_TURNS = 4
 

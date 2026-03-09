@@ -3,7 +3,7 @@ from discord.ext import commands
 from logger import setup_logger
 from message_handling import handle_message
 
-from .config import Config
+from config import Config
 
 
 # Logger
