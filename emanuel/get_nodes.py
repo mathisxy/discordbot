@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from edgynodes.llm.core.nodes import LLMNode # type: ignore
 from edgynodes.discordtmp import TemporaryMessageController # type: ignore
 from edgynodes.llm.nodes.tools.core import AddMCPToolsNode # type: ignore
+from edgynodes.llm.nodes.messages import AddMessageNode # type: ignore
 
 from config import Config
 
@@ -95,4 +96,27 @@ def get_mcp_nodes(temporary_message_controller: TemporaryMessageController) -> S
         nodes.append(AddMCPToolsNode(Client(url, log_handler=log_handler, progress_handler=progress_handler)))
 
     return nodes
+
+
+def get_chat_system_message_node() -> AddMessageNode:
+    from llmir import AIMessage, AIRoles, AIChunkText
+    return AddMessageNode(AIMessage(
+        role=AIRoles.SYSTEM,
+        chunks=[
+            AIChunkText(
+                text=Config.CHAT_SYSTEM_MESSAGE
+            )
+        ]
+    ))
+
+def get_voice_system_message_node() -> AddMessageNode:
+    from llmir import AIMessage, AIRoles, AIChunkText
+    return AddMessageNode(AIMessage(
+        role=AIRoles.SYSTEM,
+        chunks=[
+            AIChunkText(
+                text=Config.VOICE_SYSTEM_MESSAGE
+            )
+        ]
+    ))
 

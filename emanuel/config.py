@@ -46,3 +46,6 @@ class Config:
 
     OLLAMA_BASE_URL: str = getenv("OLLAMA_BASE_URL", "")
     OLLAMA_MODEL: str = getenv("OLLAMA_MODEL", "")
+
+    CHAT_SYSTEM_MESSAGE: str = getenv("CHAT_SYSTEM_MESSAGE", "")
+    VOICE_SYSTEM_MESSAGE: str = getenv("VOICE_SYSTEM_MESSAGE", "")

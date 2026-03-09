@@ -21,7 +21,7 @@ import edgynodes as e
 from logger import setup_logger
 from tools import role_dice, leave_voice_channel
 from voice_handling import handle_voice
-from get_nodes import get_llm_node, get_mcp_nodes
+from get_nodes import get_llm_node, get_mcp_nodes, get_chat_system_message_node
 
 
 logger = setup_logger(__name__)
@@ -123,6 +123,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     llm_node = get_llm_node()
     llm_node_after_max_turns = llm_node.copy()
 
+    system_message = get_chat_system_message_node()
     build_chat = BuildChatNode(limit=10)
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
@@ -150,8 +151,9 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
         edges=[
             (
                 START,
-                lambda st, sh: [start_typing, build_chat, add_tools] if should_react(sh) else None,
+                lambda st, sh: [start_typing, system_message, add_tools] if should_react(sh) else None,
 
+                build_chat,
                 add_tools,
                 *add_mcp_tools,
                 [llm_node, -turn_counter],

@@ -27,7 +27,7 @@ from edgynodes.discord.nodes.typing import StartTypingNode, StopTypingNode
 import edgynodes as e
 
 from tools import leave_voice_channel
-from get_nodes import get_llm_node, get_mcp_nodes
+from get_nodes import get_llm_node, get_mcp_nodes, get_voice_system_message_node
 
 ### STATES
 
@@ -132,18 +132,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
     stop_typing_after_error = StopTypingNode()
-    add_message = AddMessageNode(AIMessage(
-        role=AIRoles.SYSTEM,
-        chunks=[
-            AIChunkText(
-                text="Du bist Emanuel. Deine Nachrichten werden in Sprache ausgegeben im Discord Gruppen Voice Channel.\n" \
-                "Nutze deshalb NIEMALS Emojis oder Smileys und halte dich kurz.\n" \
-                # "Wichtig: Antworte nur wenn du direkt angesprochen wurdest, z.B. mit 'Emanuel'. Wenn du nicht direkt angesprochen wurdest, dann schreibe ' ' und stoppe die Antwort.\n" \
-                # "Nutze für verschiedene Emotionen das Tool 'set_voice' um die Stimme zu ändern. Nutze dieses tool regelmäßig um dich auszudrücken und die Leute zu überraschen.\n" \
-                # "Denk daran das Tool zu callen und niemals einfach set voice zu schreiben.\n"
-            )
-        ]
-    ))
+    add_message = get_voice_system_message_node()
     start_record = StartRecordVoiceNode(sink_factory=lambda: VADWaveSink(), delay=0.5)
     stop_record = StopRecordVoiceNode()
     wait_voice = AwaitVoiceStartVADNode()
