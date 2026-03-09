@@ -1,16 +1,13 @@
 import discord
-import os
 from discord.ext import commands
 from logger import setup_logger
 from message_handling import handle_message
-from dotenv import load_dotenv
+
+from .config import Config
 
 
 # Logger
 logger = setup_logger(__name__)
-
-# Load environment variables
-load_dotenv()
 
 
 # Discord Intents
@@ -46,4 +43,4 @@ async def on_ready():
     print(f"🤖 Bot online as {bot.user}!")
 
 
-bot.run(os.getenv("DISCORD_TOKEN", ""))
+bot.run(Config.DISCORD_TOKEN)
