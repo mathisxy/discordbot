@@ -44,10 +44,8 @@ class Config:
     AZURE_BASE_URL: str = getenv("AZURE_BASE_URL", "")
     AZURE_MODEL: str = getenv("AZURE_MODEL", "")
 
-    OLLAMA_BASE_URL: str = getenv("OLLAMA_BASE_URL", "")
     OLLAMA_MODEL: str = getenv("OLLAMA_MODEL", "")
+    OLLAMA_KEEP_ALIVE: str = getenv("OLLAMA_KEEP_ALIVE", "")
 
     CHAT_SYSTEM_MESSAGE: str = getenv("CHAT_SYSTEM_MESSAGE", "")
     VOICE_SYSTEM_MESSAGE: str = getenv("VOICE_SYSTEM_MESSAGE", "")
-
-    START_OLLAMA_SERVER_WITH_KEEP_ALIVE: str = getenv("START_OLLAMA_SERVER_WITH_KEEP_ALIVE", "")

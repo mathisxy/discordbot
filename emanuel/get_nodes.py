@@ -71,11 +71,9 @@ def get_llm_node() -> LLMNode:
 
             # from edgynodes.llm.nodes.openai import LLMOllamaNode # type: ignore
             model = Config.OLLAMA_MODEL
-            base_url = Config.OLLAMA_BASE_URL
             return LLMOllamaNode(
                 model=model,
                 keep_alive="0s",
-                # *{base_url: base_url} if base_url else {},
                 stream=streaming,
             )
         case _:
