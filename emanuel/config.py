@@ -49,3 +49,5 @@ class Config:
 
     CHAT_SYSTEM_MESSAGE: str = getenv("CHAT_SYSTEM_MESSAGE", "")
     VOICE_SYSTEM_MESSAGE: str = getenv("VOICE_SYSTEM_MESSAGE", "")
+
+    MAX_TURNS: int = int(require_env("MAX_TURNS"))

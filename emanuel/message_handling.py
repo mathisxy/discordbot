@@ -22,6 +22,7 @@ from logger import setup_logger
 from tools import role_dice, leave_voice_channel
 from voice_handling import handle_voice
 from get_nodes import get_llm_node, get_mcp_nodes, get_chat_system_message_node
+from config import Config
 
 
 logger = setup_logger(__name__)
@@ -142,7 +143,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
     turn_counter = IncrementTurnCounterNode()
 
-    MAX_TURNS = 4
+    MAX_TURNS = Config.MAX_TURNS
 
     # GRAPH
 
