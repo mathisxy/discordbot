@@ -153,8 +153,8 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
                 START,
                 lambda st, sh: [start_typing, system_message, add_tools] if should_react(sh) else None,
 
+                system_message,
                 build_chat,
-                add_tools,
                 *add_mcp_tools,
                 [llm_node, -turn_counter],
                 respond,

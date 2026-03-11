@@ -21,7 +21,7 @@ def get_llm_node() -> LLMNode:
             return LLMOpenAINode(
                 model=model,
                 api_key=api_key,
-                enable_streaming=streaming
+                stream=streaming
             )
         case "claude":
             from edgynodes.llm.nodes.openai import LLMClaudeNode # type: ignore
@@ -31,7 +31,7 @@ def get_llm_node() -> LLMNode:
             return LLMClaudeNode(
                 model=model,
                 api_key=api_key,
-                enable_streaming=streaming
+                stream=streaming
             )
         case "gemini":
             from edgynodes.llm.nodes.openai import LLMGeminiNode # type: ignore
@@ -41,7 +41,7 @@ def get_llm_node() -> LLMNode:
             return LLMGeminiNode(
                 model=model,
                 api_key=api_key,
-                enable_streaming=streaming
+                stream=streaming
             )
         case "mistral":
             from edgynodes.llm.nodes.openai import LLMMistralNode # type: ignore
@@ -63,17 +63,20 @@ def get_llm_node() -> LLMNode:
                 model=model,
                 api_key=api_key,
                 base_url=base_url,
-                enable_streaming=streaming
+                stream=streaming
             )
         case "ollama":
-            from edgynodes.llm.nodes.openai import LLMOllamaNode # type: ignore
+
+            from edgynodes.llm.nodes.ollama import LLMOllamaNode # type: ignore
+
+            # from edgynodes.llm.nodes.openai import LLMOllamaNode # type: ignore
             model = Config.OLLAMA_MODEL
             base_url = Config.OLLAMA_BASE_URL
             return LLMOllamaNode(
                 model=model,
-                *{base_url: base_url} if base_url else {},
-                enable_streaming=streaming,
-                keep_alive="0s"
+                keep_alive="0s",
+                # *{base_url: base_url} if base_url else {},
+                stream=streaming,
             )
         case _:
             raise ValueError(f"Unsupported LLM provider: {key}")
