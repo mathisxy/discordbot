@@ -1,0 +1,7 @@
+.env
+.github
+__pycache__/
+*.log
+LICENSE
+README.md
+pyproject.toml
