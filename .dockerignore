@@ -4,4 +4,3 @@ __pycache__/
 *.log
 LICENSE
 README.md
-pyproject.toml
