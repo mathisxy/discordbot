@@ -1,0 +1,23 @@
+[project]
+name = "emanuel"
+dynamic = ["version"]
+description = "A configurable discord bot with a LLM pipeline integration"
+authors = [{ name="Mathis Siebert" }]
+readme = "README.md"
+license-files = [
+    "LICENSE"
+]
+requires-python = ">=3.13"
+dependencies = [
+  "py-cord>=2.6",
+]
+
+[project.optional-dependencies]
+openai = ["openai"]
+ollama = ["ollama"]
+
+[build-system]
+requires = ["setuptools>=80", "setuptools_scm>=8", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
