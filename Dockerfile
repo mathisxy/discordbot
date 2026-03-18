@@ -4,6 +4,9 @@ WORKDIR /app
 
 COPY . .
 
-RUN pip install --no-cache-dir .[openai,ollama]
+# TODO: Integrate in github actions
+ARG EXTRAS=openai,ollama
+
+RUN pip install --no-cache-dir .[$EXTRAS]
 
 CMD ["python", "main.py"]
