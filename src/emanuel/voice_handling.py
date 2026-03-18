@@ -3,7 +3,6 @@ from edgygraph.graph_hooks import NodePrintHook
 import discord
 from discord.ext import commands
 import os
-from rich import print
 from typing import Protocol, Literal
 from llmir import AIMessage, AIRoles, AIChunkText
 from piper import SynthesisConfig

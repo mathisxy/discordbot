@@ -1,10 +1,9 @@
 import discord
 from discord.ext import commands
-from rich import print as rprint
 import asyncio
 from typing import Protocol
 
-from edgygraph import Graph, START, END, Node, State, Shared
+from edgygraph import Graph, START, END, State, Shared
 from edgygraph.graph_hooks import NodePrintHook
 from llmir import AIChunkText, AIMessage, AIRoles
 from edgynodes.llm.nodes.tools import ToolContext
@@ -79,16 +78,6 @@ async def join_voice_channel(ctx: ToolContext[MyStateProtocol, MySharedProtocol]
     asyncio.create_task(handle_voice(voice_channel, message.channel, bot=bot))
 
     return f"✅ Erfolgreich **{voice_channel.name}** beigetreten."
-
-### NODES
-
-class DebugNode(Node[MyStateProtocol, MySharedProtocol]):
-
-    async def __call__(self, state: MyStateProtocol, shared: MySharedProtocol) -> None:
-        rprint("DEBUG NODE")
-        rprint(state)
-        rprint(shared)
-        rprint("DEBUG NODE END")
 
 
 ### GRAPH HANDLING
@@ -192,4 +181,4 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
     state, shared = await graph(state, shared)
 
-    rprint("Finished handling message.")
+    print("Finished handling message.")
