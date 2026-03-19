@@ -13,7 +13,7 @@ from edgynodes.discordvoice.nodes.vad import VADWaveSink, AwaitVoiceStartVADNode
 from edgynodes.discordvoice.nodes.stt import STTMistralNode
 from edgynodes.discordvoice.nodes.interrupt import SetInterruptNode, ClearInterruptNode
 from edgynodes.discordvoice_llm.nodes.transcriptions_to_ai import TranscriptionsToAINode
-from edgynodes.discordvoice_llm.nodes.tts.qwen import Qwen3TTSNode
+from edgynodes.discordvoice_llm.nodes.tts.piper import PiperTTSNode
 from edgynodes.discord_llm.nodes.build_chat import BuildChatNode
 from edgynodes.discord_llm.nodes.respond import RespondNode
 from edgynodes.llm.nodes.messages import SaveNewMessagesNode, AddMessageNode
@@ -163,7 +163,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
 
     initial = (*add_mcp_tools, tools, add_message, build_chat, join)
 
-    tts = Qwen3TTSNode()# PiperTTSNode(syn_config=syn_config) # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
+    tts = PiperTTSNode(syn_config=syn_config) # ("piper/de_DE-eva_k-x_low.onnx", "piper/de_DE-eva_k-x_low.onnx.json"))
 
     strip_formattings = StripFormattingsNode()
 
