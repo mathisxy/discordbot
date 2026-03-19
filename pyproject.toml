@@ -17,6 +17,8 @@ dependencies = [
   "docstring_parser",
   "openai",
   "ollama",
+  "mcp",
+  "fastmcp",
 ]
 
 [project.optional-dependencies]
