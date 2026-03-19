@@ -12,6 +12,11 @@ dependencies = [
   "py-cord>=2.6",
   "edgygraph>=0.0.89",
   "edgynodes>=0.0.103",
+
+  "llmir",
+  "docstring_parser",
+  "openai",
+  "ollama",
 ]
 
 [project.optional-dependencies]
