@@ -19,7 +19,7 @@ dependencies = [
   "ollama",
   "mcp",
   "fastmcp",
-  "piper",
+  "piper-tts",
 ]
 
 [project.optional-dependencies]
