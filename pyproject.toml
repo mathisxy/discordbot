@@ -21,6 +21,7 @@ dependencies = [
   "fastmcp",
   "piper-tts",
   "webrtcvad",
+  "setuptools",
 ]
 
 [project.optional-dependencies]
