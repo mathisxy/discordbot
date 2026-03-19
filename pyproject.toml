@@ -11,7 +11,7 @@ requires-python = ">=3.13"
 dependencies = [
   "py-cord>=2.6",
   "edgygraph>=0.0.89",
-  "edgynodes>=0.0.103",
+  "edgynodes>=0.0.104",
 
   "llmir",
   "docstring_parser",
