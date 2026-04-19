@@ -19,12 +19,23 @@ import edgynodes as e
 
 from logger import setup_logger
 from tools import role_dice, leave_voice_channel
-from voice_handling import handle_voice
 from get_nodes import get_llm_node, get_mcp_nodes, get_chat_system_message_node
 from config import Config
 
-
 logger = setup_logger(__name__)
+
+voice_available = False
+
+if Config.ENABLE_VOICE:
+    from voice_handling import handle_voice
+    voice_available = True
+elif Config.ENABLE_VOICE is None:
+    try:
+        from voice_handling import handle_voice
+        voice_available = True
+    except ImportError:
+        logger.warning("Voice handling not available: required optional dependencies not installed")
+        voice_available = False
 
 
 ### STATES
@@ -64,6 +75,9 @@ def should_react(shared: MySharedProtocol) -> bool:
 
 
 async def join_voice_channel(ctx: ToolContext[MyStateProtocol, MySharedProtocol]) -> str:
+
+    if not voice_available:
+        raise Exception("❌ Voice ist nicht verfügbar.")
 
     async with ctx.shared.lock:
         bot = ctx.shared.discord.bot
@@ -117,7 +131,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     build_chat = BuildChatNode(limit=10)
     start_typing = StartTypingNode()
     stop_typing = StopTypingNode()
-    add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel])
+    add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel] if voice_available else [role_dice])
     add_mcp_tools = get_mcp_nodes(temporary_message_controller)
     get_new_tool_calls = ExtractNewToolCallsNode()
     respond = RespondNode()

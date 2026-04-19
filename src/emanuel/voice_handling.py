@@ -1,5 +1,5 @@
 from edgygraph import Graph, START, Node, StateProtocol, SharedProtocol, END, State, Shared
-from edgygraph.graph_hooks import NodePrintHook
+from edgygraph.graph_hooks import NodePrintHook, InteractiveDebugHook
 import discord
 from discord.ext import commands
 import os
@@ -170,7 +170,7 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
 
     await Graph[MyStateProtocol, MySharedProtocol](
         hooks=[
-            #InteractiveDebugHook(),
+            # InteractiveDebugHook(),
             NodePrintHook()
         ],
         edges=[
@@ -215,8 +215,6 @@ async def handle_voice(channel: discord.VoiceChannel, text_channel: discord.abc.
                 wait_silence,
 
                 Exception,
-                stop_typing_after_error,
-
                 stop_typing_after_error,
                 lambda st, sh: on_end(st, sh),
 

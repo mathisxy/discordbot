@@ -10,7 +10,8 @@ from config import Config
 def get_llm_node() -> LLMNode:
     
     key = Config.LLM_PROVIDER.lower()
-    streaming = Config.LLM_STREAMING.lower() == "true"
+    streaming = Config.LLM_STREAMING
+    think = Config.OLLAMA_THINK
 
     match key:
         case "openai":
@@ -69,12 +70,12 @@ def get_llm_node() -> LLMNode:
 
             from edgynodes.llm.nodes.ollama import LLMOllamaNode # type: ignore
 
-            # from edgynodes.llm.nodes.openai import LLMOllamaNode # type: ignore
             model = Config.OLLAMA_MODEL
             return LLMOllamaNode(
                 model=model,
-                keep_alive="0s",
+                keep_alive=Config.OLLAMA_KEEP_ALIVE,
                 stream=streaming,
+                think=think,
             )
         case _:
             raise ValueError(f"Unsupported LLM provider: {key}")

@@ -19,14 +19,16 @@ dependencies = [
   "ollama",
   "mcp",
   "fastmcp",
-  "piper-tts",
-  "webrtcvad",
-  "setuptools",
 ]
 
 [project.optional-dependencies]
 openai = ["openai"]
 ollama = ["ollama"]
+voice = [
+  "piper-tts",
+  "webrtcvad",
+  "setuptools",
+]
 
 [build-system]
 requires = ["setuptools"]

@@ -1,4 +1,5 @@
 from os import getenv
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,8 @@ def getenv_csv(key: str) -> list[str]:
 
 
 class Config:
+
+    ENABLE_VOICE: bool | None = (value == "true") if (value := getenv("ENABLE_VOICE", "").lower()) in ["true", "false"] else None
 
     DISCORD_TOKEN: str = require_env("DISCORD_TOKEN")
 
@@ -46,6 +49,10 @@ class Config:
 
     OLLAMA_MODEL: str = getenv("OLLAMA_MODEL", "")
     OLLAMA_KEEP_ALIVE: str = getenv("OLLAMA_KEEP_ALIVE", "")
+    OLLAMA_THINK: bool | Literal["low", "medium", "high"] | None = (value if (value := getenv("OLLAMA_THINK", "").strip().lower()) in ["low","medium","high"]  # type: ignore[assignment]
+        else True if value in {"1","true","yes","on"}
+        else False if value in {"0","false","no","off"}
+        else None)
 
     CHAT_SYSTEM_MESSAGE: str = getenv("CHAT_SYSTEM_MESSAGE", "")
     VOICE_SYSTEM_MESSAGE: str = getenv("VOICE_SYSTEM_MESSAGE", "")
