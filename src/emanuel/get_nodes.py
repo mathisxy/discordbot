@@ -76,6 +76,7 @@ def get_llm_node() -> LLMNode:
                 keep_alive=Config.OLLAMA_KEEP_ALIVE,
                 stream=streaming,
                 think=think,
+                generate_unique_tool_call_ids=True,
             )
         case _:
             raise ValueError(f"Unsupported LLM provider: {key}")

@@ -5,6 +5,7 @@ from typing import Protocol
 
 from edgygraph import Graph, START, END, State, Shared
 from edgygraph.graph_hooks import NodePrintHook
+from edgygraph.nodes import Node
 from llmir import AIChunkText, AIMessage, AIRoles
 from edgynodes.llm.nodes.tools import ToolContext
 from edgynodes.llm.nodes.tools import ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode
@@ -15,7 +16,10 @@ from edgynodes.discord_llm.nodes.build_chat import BuildChatNode
 from edgynodes.discord_llm.nodes.respond import RespondNode
 from edgynodes.discordtmp import TemporaryMessageController
 from edgynodes.discordtmp.nodes.clear import ClearTmpDiscordMessagesNode
+from edgynodes.redis.nodes import ReadAllNode, WriteAllNode, CloseNode
 import edgynodes as e 
+
+import redis.asyncio as redis
 
 from logger import setup_logger
 from tools import role_dice, leave_voice_channel
@@ -40,10 +44,10 @@ elif Config.ENABLE_VOICE is None:
 
 ### STATES
 
-class MyStateProtocol(e.llm.StateProtocol, e.discord.StateProtocol, e.discordtmp.StateProtocol, e.discordmessage.StateProtocol, Protocol):
+class MyStateProtocol(e.llm.StateProtocol, e.discord.StateProtocol, e.discordtmp.StateProtocol, e.discordmessage.StateProtocol, e.redis.StateProtocol, Protocol):
     pass
 
-class MySharedProtocol(e.llm.SharedProtocol, e.discord.SharedProtocol, e.discordtmp.SharedProtocol, e.discordmessage.SharedProtocol, Protocol):
+class MySharedProtocol(e.llm.SharedProtocol, e.discord.SharedProtocol, e.discordtmp.SharedProtocol, e.discordmessage.SharedProtocol, e.redis.SharedProtocol, Protocol):
     pass
 
 
@@ -52,13 +56,45 @@ class MyState(State):
     discord: e.discord.StateAttribute
     discordtmp: e.discordtmp.StateAttribute
     discordmessage: e.discordmessage.StateAttribute
-
+    redis: e.redis.StateAttribute
 
 class MyShared(Shared):
     llm: e.llm.SharedAttribute
     discord: e.discord.SharedAttribute
     discordtmp: e.discordtmp.SharedAttribute
     discordmessage: e.discordmessage.SharedAttribute
+    redis: e.redis.SharedAttribute
+
+
+### NODES
+
+class SaveToolCallsToRedisNode(Node[MyStateProtocol, MySharedProtocol]):
+    
+    async def __call__(self, state: MyStateProtocol, shared: MySharedProtocol) -> None:
+
+        print("Saving new tool calls to Redis: ", shared.llm.new_tool_calls)
+
+        for tool_call in shared.llm.new_tool_calls:
+            state.redis.write.append({f"tool_call_{tool_call.id}": tool_call.model_dump_json()})
+
+class SaveToolCallResultsToRedisNode(Node[MyStateProtocol, MySharedProtocol]):
+
+    def __init__(self, max_result_length: int = 1000) -> None:
+        super().__init__()
+        self.max_result_length = max_result_length
+
+
+    async def __call__(self, state: MyStateProtocol, shared: MySharedProtocol) -> None:
+
+        print("Saving new tool call results to Redis: ", shared.llm.new_tool_call_results)
+
+        for tool_call, result in shared.llm.new_tool_call_results:
+            try:
+                string_result = str(result)
+                if len(string_result) <= self.max_result_length:  # Limit to prevent excessively large entries
+                    state.redis.write.append({f"tool_call_result_{tool_call.id}": string_result})
+            except Exception as e:
+                logger.error(f"Error occurred while saving tool call result for {tool_call.id}: {e}")
 
 
 ### EDGES
@@ -68,7 +104,6 @@ def should_react(shared: MySharedProtocol) -> bool:
         shared.discord.bot.user in shared.discordmessage.message.mentions          # Only when mentioned
         or isinstance(shared.discordmessage.message.channel, discord.DMChannel)    # Or when in DM
     )
-
 
 
 ### TOOLS
@@ -109,7 +144,8 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
         discordtmp=e.discordtmp.StateAttribute(),
         discord=e.discord.StateAttribute(),
         llm=e.llm.StateAttribute(),
-    )
+        redis=e.redis.StateAttribute()
+    )   
     shared = MyShared(
         discordmessage=e.discordmessage.SharedAttribute(
             message=message
@@ -122,6 +158,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
             bot=bot,
         ),
         llm=e.llm.SharedAttribute(),
+        redis=e.redis.SharedAttribute()
     )
 
     llm_node = get_llm_node()
@@ -134,6 +171,8 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel] if voice_available else [role_dice])
     add_mcp_tools = get_mcp_nodes(temporary_message_controller)
     get_new_tool_calls = ExtractNewToolCallsNode()
+    save_new_tool_calls_redis = SaveToolCallsToRedisNode()
+    save_new_tool_call_results_redis = SaveToolCallResultsToRedisNode()
     respond = RespondNode()
     respond_tool_results = RespondNode()
     respond_after_error = RespondNode()
@@ -145,6 +184,8 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     integrate_tool_call_results = IntegrateToolResultsNode()
     integrate_mcp_tool_call_results = IntegrateMCPToolResultsNode()
     turn_counter = IncrementTurnCounterNode()
+    flush_redis_writes = WriteAllNode()
+    close_redis_connection = CloseNode()
 
     MAX_TURNS = Config.MAX_TURNS
 
@@ -163,13 +204,19 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
                 [llm_node, -turn_counter],
                 respond,
                 get_new_tool_calls,
+                save_new_tool_calls_redis,
                 save_messages,
-                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results,
+                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else stop_typing,
 
                 get_next_tool_call_result,
                 clear_tmp_discord_messages,
-                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else integrate_mcp_tool_call_results,
+                lambda st, sh: get_next_tool_call_result if sh.llm.new_tool_calls else save_new_tool_call_results_redis,
 
+                save_new_tool_call_results_redis,
+                lambda st, sh: print(f"Current Redis write queue: {st.redis.write}"),
+                
+                save_new_tool_call_results_redis,
+                flush_redis_writes,
                 integrate_mcp_tool_call_results,
                 integrate_tool_call_results,
                 lambda st, sh: stop_typing if not st.llm.new_messages else respond_tool_results,
@@ -188,6 +235,7 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
                 Exception,
                 stop_typing,
+                close_redis_connection,
 
                 END
         )]
