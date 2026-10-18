@@ -3,28 +3,30 @@ from discord.ext import commands
 import asyncio
 from typing import Protocol
 
-from edgygraph import Graph, START, END, State, Shared
-from edgygraph.graph_hooks import NodePrintHook
-from edgygraph.nodes import Node
+from edgygraph import Graph, START, END, State, Shared, Node
+#from edgygraph.graph.types import ErrorSource, NextWithConfig, SourceWithConfig
+from edgygraph.graph_hooks import InteractiveDebugHook, NodePrintHook
 from llmir import AIChunkText, AIMessage, AIRoles
+from edgynodes.llm.nodes.wait_for_vram import WaitForVRAMNode
 from edgynodes.llm.nodes.tools import ToolContext
 from edgynodes.llm.nodes.tools import ExtractNewToolCallsNode, GetNextToolCallResultNode, IntegrateToolResultsNode, IntegrateMCPToolResultsNode, AddToolsNode
 from edgynodes.llm.nodes.messages import AddMessageNode, SaveNewMessagesNode
 from edgynodes.llm.nodes.turn_counter import IncrementTurnCounterNode
-from edgynodes.discord.nodes.typing import StartTypingNode, StopTypingNode
+from edgynodes.discord.nodes import StartTypingNode, StopTypingNode
 from edgynodes.discord_llm.nodes.build_chat import BuildChatNode
 from edgynodes.discord_llm.nodes.respond import RespondNode
 from edgynodes.discordtmp import TemporaryMessageController
 from edgynodes.discordtmp.nodes.clear import ClearTmpDiscordMessagesNode
-from edgynodes.redis.nodes import ReadAllNode, WriteAllNode, CloseNode
+from edgynodes.redis.nodes import WriteAllNode, CloseNode
 import edgynodes as e 
 
-import redis.asyncio as redis
+#graph_types.BranchContent
 
 from logger import setup_logger
 from tools import role_dice, leave_voice_channel
 from get_nodes import get_llm_node, get_mcp_nodes, get_chat_system_message_node
 from config import Config
+
 
 logger = setup_logger(__name__)
 
@@ -163,15 +165,24 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
     llm_node = get_llm_node()
     llm_node_after_max_turns = llm_node.copy()
+    
 
     system_message = get_chat_system_message_node()
+    
+    
     build_chat = BuildChatNode(limit=10)
+    
     start_typing = StartTypingNode()
+    
+    
     stop_typing = StopTypingNode()
+    
     add_tools = AddToolsNode([role_dice, join_voice_channel, leave_voice_channel] if voice_available else [role_dice])
     add_mcp_tools = get_mcp_nodes(temporary_message_controller)
     get_new_tool_calls = ExtractNewToolCallsNode()
+    
     save_new_tool_calls_redis = SaveToolCallsToRedisNode()
+    
     save_new_tool_call_results_redis = SaveToolCallResultsToRedisNode()
     respond = RespondNode()
     respond_tool_results = RespondNode()
@@ -187,6 +198,14 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
     flush_redis_writes = WriteAllNode()
     close_redis_connection = CloseNode()
 
+    wait_for_vram = WaitForVRAMNode(
+        required_gb=Config.WAIT_FOR_VRAM_REQUIRED_GB,
+        timeout=Config.WAIT_FOR_VRAM_TIMEOUT,
+        interval=Config.WAIT_FOR_VRAM_INTERVAL
+    )
+
+    vram_gate: tuple[WaitForVRAMNode, ...] = (wait_for_vram,) if Config.WAIT_FOR_VRAM else ()
+
     MAX_TURNS = Config.MAX_TURNS
 
     # GRAPH
@@ -198,9 +217,11 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
                 START,
                 lambda st, sh: [start_typing, system_message, add_tools] if should_react(sh) else None,
 
-                system_message,
+                start_typing,
+                *vram_gate,
                 build_chat,
                 *add_mcp_tools,
+
                 [llm_node, -turn_counter],
                 respond,
                 get_new_tool_calls,
@@ -214,7 +235,6 @@ async def handle_message(message: discord.Message, bot: commands.Bot) -> None:
 
                 save_new_tool_call_results_redis,
                 lambda st, sh: print(f"Current Redis write queue: {st.redis.write}"),
-                
                 save_new_tool_call_results_redis,
                 flush_redis_writes,
                 integrate_mcp_tool_call_results,
